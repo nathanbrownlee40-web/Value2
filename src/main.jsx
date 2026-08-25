@@ -13,37 +13,30 @@ function noVig(odds){
 
 function scanEvents(data, minValue){
   const rows=[];
-  for(const ev of (data?.events || [])){
-    const marketMap={};
+  const events = Array.isArray(data) ? data : (data?.events || []);
+  for(const ev of events){
+    const marketOutcomes = {};
     for(const book of (ev.bookmakers || [])){
-      for(const market of (book.markets || [])){
-        if(market.key !== "h2h") continue;
-        for(const out of (market.outcomes || [])){
-          const key=out.name;
-          (marketMap[key] ||= []).push({book:book.title, price:Number(out.price)});
-        }
-      }
+      const h2h = (book.markets || []).find(m => m.key === "h2h");
+      if(!h2h?.outcomes?.length) continue;
+      const valid = h2h.outcomes.every(o => Number(o.price) > 1);
+      if(!valid) continue;
+      const probs = noVig(h2h.outcomes.map(o => Number(o.price)));
+      h2h.outcomes.forEach((o,i)=>{
+        (marketOutcomes[o.name] ||= []).push({book:book.title, price:Number(o.price), probability:probs[i]});
+      });
     }
-    for(const [outcome, quotes] of Object.entries(marketMap)){
+
+    for(const [outcome, quotes] of Object.entries(marketOutcomes)){
       if(quotes.length < 2) continue;
-      const fairPs=[];
-      const byBook={};
-      for(const q of quotes) (byBook[q.book] ||= []).push(q.price);
-      for(const prices of Object.values(byBook)){
-        if(prices.length>1){
-          const probs=noVig(prices);
-          fairPs.push(probs[prices.indexOf(Math.max(...prices))] ?? 0);
-        }
-      }
-      const allImplied=quotes.map(q=>1/q.price);
-      const marketP=allImplied.reduce((a,b)=>a+b,0)/allImplied.length;
-      const fairProb = fairPs.length ? fairPs.reduce((a,b)=>a+b,0)/fairPs.length : marketP;
+      const fairProb = quotes.reduce((sum,q)=>sum+q.probability,0)/quotes.length;
+      if(!(fairProb > 0 && fairProb < 1)) continue;
       const fairOdds=1/fairProb;
       const best=quotes.reduce((a,b)=>b.price>a.price?b:a);
       const value=(best.price/fairOdds)-1;
       if(value >= minValue/100){
         rows.push({
-          id:`${ev.id}-${outcome}`, sport:ev.sport_title, league:ev.league_title,
+          id:`${ev.id}-${outcome}`, sport:ev.sport_title || ev.sport_key || "", league:ev.league_title || ev.sport_title || ev.sport_key || "",
           home:ev.home_team, away:ev.away_team, commence:ev.commence_time,
           outcome, bookmaker:best.book, odds:best.price, fairOdds,
           probability:fairProb, value, books:quotes.length
@@ -65,11 +58,12 @@ function App(){
   async function scan(){
     setLoading(true); setError("");
     try{
-      const q=sport==="all"?"":`?sport=${encodeURIComponent(sport)}`;
-      const r=await fetch(`/api/odds${q}`);
+      const r=await fetch(`/api/odds`);
       const j=await r.json();
-      if(!r.ok) throw new Error(j.error || "API request failed");
-      setRows(scanEvents(j,minValue)); setLast(new Date());
+      if(!r.ok) throw new Error(j.error || `API request failed (${r.status})`);
+      const scanned=scanEvents(j,minValue);
+      setRows(sport === "all" ? scanned : scanned.filter(x => x.sport === sport));
+      setLast(new Date());
     }catch(e){setError(e.message)}
     finally{setLoading(false)}
   }
