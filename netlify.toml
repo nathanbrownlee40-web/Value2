@@ -1,11 +1,9 @@
 [build]
-  command = "npm run build"
-  publish = "dist"
-
+command="npm run build"
+publish="dist"
 [functions]
-  directory = "netlify/functions"
-
+directory="netlify/functions"
 [[redirects]]
-  from = "/api/odds"
-  to = "/.netlify/functions/odds"
-  status = 200
+from="/api/scanner"
+to="/.netlify/functions/scanner"
+status=200

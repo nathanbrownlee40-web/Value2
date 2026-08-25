@@ -1,24 +1,32 @@
-# Value Bet Scanner — Netlify
+# Value Bet Scanner 2.0
 
-This is a ready-to-deploy Netlify app.
+Netlify-ready football value scanner using The Odds API v4.
 
-## What it does
-- Pulls live odds through a Netlify serverless function so the API key is not exposed in the browser.
-- Compares bookmaker prices across the available market.
-- Calculates margin-adjusted market probability and estimated fair odds.
-- Shows the best available price and estimated value percentage.
-- Filters by minimum value and sport.
+## Netlify environment variables
+- `ODDS_API_KEY` — your secret API key
+- `ODDS_API_REGION` — default `uk`
+- `SCAN_MAX_EVENTS` — default `12`, maximum `40`
 
-## Netlify setup
-1. Upload this project to a GitHub repository.
-2. Import the repository into Netlify.
-3. Add an environment variable:
-   - `ODDS_API_KEY` = your API key
-   - `ODDS_API_REGION` = `uk` (optional)
-   - `ODDS_API_MARKETS` = `h2h` (optional)
-4. Deploy.
+Do not put the API key in frontend code or commit it to GitHub.
 
-The included adapter is for The Odds API v4. If your free API is a different provider, replace the URL/normalisation in `netlify/functions/odds.js` with that provider's endpoint and return the same event structure.
+## What it scans
+- Match result
+- BTTS / BTTS first half
+- Goals totals / team goals
+- Corners / team corners / corner handicap
+- Cards / card handicap
+- Player shots
+- Player shots on target
+- Player to receive a card
 
-## Important
-"Value" here is market-derived value: it compares a bookmaker's best price to a fair price estimated from the available market. It is not a guaranteed predictive edge. A stronger version can add a separate prediction/model probability, then calculate true model EV.
+Coverage depends on bookmaker/sport/market availability. Some soccer player props are limited to selected bookmakers and regions.
+
+## How the value calculation works
+For each market line, the scanner removes the bookmaker margin from the available two-way/three-way quotes to estimate a fair probability. It then compares the best bookmaker price against the estimated fair odds.
+
+`value = best_bookmaker_odds / fair_odds - 1`
+
+Confidence is deliberately labelled as a heuristic ranking, not a predictive model.
+
+## Free-plan protection
+The API's event-odds endpoint charges by returned markets × regions. The scanner defaults to 12 events to avoid burning the 500-credit free allowance too quickly. You can lower `SCAN_MAX_EVENTS` to 5–10 for testing.
