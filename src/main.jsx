@@ -1,105 +1,18 @@
-import React, {useEffect, useMemo, useState} from "react";
+import React,{useMemo,useState} from "react";
 import {createRoot} from "react-dom/client";
 import "./style.css";
-
-const fmtOdds = n => Number(n).toFixed(2);
-const pct = n => `${(n*100).toFixed(1)}%`;
-
-function noVig(odds){
-  const p = odds.map(o => 1/Number(o)).filter(Number.isFinite);
-  const s = p.reduce((a,b)=>a+b,0);
-  return p.map(x => x/s);
-}
-
-function scanEvents(data, minValue){
-  const rows=[];
-  const events = Array.isArray(data) ? data : (data?.events || []);
-  for(const ev of events){
-    const marketOutcomes = {};
-    for(const book of (ev.bookmakers || [])){
-      const h2h = (book.markets || []).find(m => m.key === "h2h");
-      if(!h2h?.outcomes?.length) continue;
-      const valid = h2h.outcomes.every(o => Number(o.price) > 1);
-      if(!valid) continue;
-      const probs = noVig(h2h.outcomes.map(o => Number(o.price)));
-      h2h.outcomes.forEach((o,i)=>{
-        (marketOutcomes[o.name] ||= []).push({book:book.title, price:Number(o.price), probability:probs[i]});
-      });
-    }
-
-    for(const [outcome, quotes] of Object.entries(marketOutcomes)){
-      if(quotes.length < 2) continue;
-      const fairProb = quotes.reduce((sum,q)=>sum+q.probability,0)/quotes.length;
-      if(!(fairProb > 0 && fairProb < 1)) continue;
-      const fairOdds=1/fairProb;
-      const best=quotes.reduce((a,b)=>b.price>a.price?b:a);
-      const value=(best.price/fairOdds)-1;
-      if(value >= minValue/100){
-        rows.push({
-          id:`${ev.id}-${outcome}`, sport:ev.sport_title || ev.sport_key || "", league:ev.league_title || ev.sport_title || ev.sport_key || "",
-          home:ev.home_team, away:ev.away_team, commence:ev.commence_time,
-          outcome, bookmaker:best.book, odds:best.price, fairOdds,
-          probability:fairProb, value, books:quotes.length
-        });
-      }
-    }
-  }
-  return rows.sort((a,b)=>b.value-a.value);
-}
-
+const fmt=n=>Number(n).toFixed(2), pct=n=>`${(Number(n)*100).toFixed(1)}%`;
+const icon={Goals:"⚽",Corners:"🚩","Team Corners":"🚩",Cards:"🟨","Card Handicap":"🟨","Player Card":"🟨","Player Shots":"🎯","Shots on Target":"🎯",BTTS:"⚽","BTTS 1st Half":"⚽","Match Result":"🏆"};
 function App(){
-  const [rows,setRows]=useState([]);
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState("");
-  const [minValue,setMinValue]=useState(3);
-  const [sport,setSport]=useState("all");
-  const [last,setLast]=useState(null);
-
-  async function scan(){
-    setLoading(true); setError("");
-    try{
-      const r=await fetch(`/api/odds`);
-      const j=await r.json();
-      if(!r.ok) throw new Error(j.error || `API request failed (${r.status})`);
-      const scanned=scanEvents(j,minValue);
-      setRows(sport === "all" ? scanned : scanned.filter(x => x.sport === sport));
-      setLast(new Date());
-    }catch(e){setError(e.message)}
-    finally{setLoading(false)}
-  }
-  useEffect(()=>{scan()},[]);
-
-  const sports=useMemo(()=>["all",...new Set(rows.map(x=>x.sport))],[rows]);
-
-  return <div className="app">
-    <header><div><div className="eyebrow">LIVE MARKET SCANNER</div><h1>Value Bet Scanner</h1>
-    <p>Find bookmaker prices trading above the market-derived fair odds.</p></div>
-    <button className="scan" onClick={scan} disabled={loading}>{loading?"SCANNING…":"SCAN NOW"}</button></header>
-
-    <section className="controls">
-      <label>Minimum value <input type="number" min="0" step=".5" value={minValue} onChange={e=>setMinValue(e.target.value)}/>%</label>
-      <label>Sport <select value={sport} onChange={e=>setSport(e.target.value)}>
-        {sports.map(s=><option key={s} value={s}>{s==="all"?"All sports":s}</option>)}
-      </select></label>
-      <div className="status">{last?`Updated ${last.toLocaleTimeString()}`:"Waiting for scan"}</div>
-    </section>
-
-    {error && <div className="error">{error}</div>}
-    <div className="note">Fair odds are calculated from the available bookmaker market and margin-adjusted probabilities. They are an estimate, not a guarantee of profit.</div>
-
-    <main>
-      <div className="tableHead"><span>VALUE BET</span><span>BOOK</span><span>ODDS</span><span>FAIR ODDS</span><span>PROBABILITY</span><span>VALUE</span></div>
-      {rows.length===0 && !loading ? <div className="empty">No bets currently meet {minValue}% value. Lower the filter or scan again.</div> :
-      rows.map(r=><article className="row" key={r.id}>
-        <div><strong>{r.outcome}</strong><small>{r.home} vs {r.away}<br/>{r.league}</small></div>
-        <div>{r.bookmaker}<small>{r.books} prices checked</small></div>
-        <div className="odds">{fmtOdds(r.odds)}</div>
-        <div>{fmtOdds(r.fairOdds)}</div>
-        <div>{pct(r.probability)}</div>
-        <div className="value">+{(r.value*100).toFixed(1)}%</div>
-      </article>)}
-    </main>
-    <footer>Built for Netlify • Odds are informational only • Always check bookmaker rules and market status.</footer>
-  </div>
-}
+ const [data,setData]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState(""),[min,setMin]=useState(3),[market,setMarket]=useState("ALL"),[conf,setConf]=useState("ALL");
+ async function scan(){setLoading(true);setError("");try{const r=await fetch("/api/scanner");const j=await r.json();if(!r.ok)throw new Error(j.error||"API request failed");setData(j)}catch(e){setError(e.message)}finally{setLoading(false)}}
+ const rows=useMemo(()=> (data?.results||[]).filter(x=>x.value*100>=Number(min)).filter(x=>market==="ALL"||x.marketKey===market).filter(x=>conf==="ALL"||x.confidence===conf),[data,min,market,conf]);
+ const markets=[["ALL","All markets"],...Array.from(new Map((data?.results||[]).map(x=>[x.marketKey,x.market])).entries())];
+ return <div className="app"><header><div><div className="eyebrow">LIVE FOOTBALL VALUE ENGINE</div><h1>Bet Scanner <span>2.0</span></h1><p>Goals • Corners • Shots • SOT • Cards • BTTS</p></div><button onClick={scan} disabled={loading}>{loading?"SCANNING…":"SCAN NOW"}</button></header>
+ <section className="stats"><div><b>{rows.length}</b><small>VALUE BETS</small></div><div><b>{data?.eventsScanned||0}</b><small>GAMES SCANNED</small></div><div><b>{data?.quota?.remaining??"—"}</b><small>CREDITS LEFT</small></div></section>
+ <section className="controls"><label>MIN VALUE <input type="number" min="0" step=".5" value={min} onChange={e=>setMin(e.target.value)}/>%</label><label>MARKET <select value={market} onChange={e=>setMarket(e.target.value)}>{markets.map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label>CONFIDENCE <select value={conf} onChange={e=>setConf(e.target.value)}><option>ALL</option><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></label></section>
+ {error&&<div className="error">{error}</div>}
+ <div className="explain">Fair odds = margin-adjusted consensus probability from the available bookmaker quotes. Confidence is a transparent ranking heuristic based on value, probability and number of books — <b>not a prediction guarantee</b>.</div>
+ <main>{rows.length===0&&!loading?<div className="empty">{data?"No value bets match your filters. Try 0–3% or All markets.":"Press SCAN NOW to scan."}</div>:rows.map(r=><article className="card" key={r.id}><div className="top"><span className="tag">{icon[r.market]||"•"} {r.market}</span><span className={`confidence ${r.confidence.toLowerCase()}`}>{r.confidence}</span></div><h2>{r.selection}{r.point!==null&&r.point!==undefined?` ${r.point}`:""}</h2><p className="game">{r.home} <b>vs</b> {r.away}</p><div className="grid"><div><small>BEST ODDS</small><strong>{fmt(r.odds)}</strong><em>{r.bookmaker}</em></div><div><small>FAIR ODDS</small><strong>{fmt(r.fairOdds)}</strong></div><div><small>PROBABILITY</small><strong>{pct(r.probability)}</strong></div><div><small>VALUE</small><strong className="green">+{(r.value*100).toFixed(1)}%</strong></div></div></article>)}</main>
+ <footer>{data?.quota?.remaining!==null&&data?.quota?.remaining!==undefined?`API credits remaining: ${data.quota.remaining} • `:""}Markets depend on bookmaker coverage.</footer></div>}
 createRoot(document.getElementById("root")).render(<App/>);
