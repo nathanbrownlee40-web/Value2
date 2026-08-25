@@ -1,121 +1,238 @@
-const API="https://api.the-odds-api.com/v4";
-const MAJOR_PATTERNS=[
-  ["Premier League","soccer_epl"],["Champions League","soccer_uefa_champs_league"],
-  ["Europa League","soccer_uefa_europa_league"],["La Liga","soccer_spain_la_liga"],
-  ["Bundesliga","soccer_germany_bundesliga"],["Serie A","soccer_italy_serie_a"],
-  ["Ligue 1","soccer_france_ligue_one"],["Eredivisie","soccer_netherlands_eredivisie"],
-  ["Primeira Liga","soccer_portugal_primeira_liga"],["Scottish Premiership","soccer_spl"],
-  ["Championship","soccer_efl_champ"],["MLS","soccer_usa_mls"],["Brazil Serie A","soccer_brazil_campeonato"],
-  ["Argentina Liga Profesional","soccer_argentina_primera_division"],["Belgian Pro League","soccer_belgium_first_div"],
-  ["Turkish Super Lig","soccer_turkey_super_league"],["Saudi Pro League","soccer_saudi_arabia_pro_league"]
-];
-const MARKETS={
-  result:["h2h","Match Result"],
-  goals:["totals","Goals O/U"],
-  btts:["btts","BTTS"],
-  corners:["alternate_totals_corners","Corners O/U","alternate_spreads_corners","Corner Handicap","alternate_team_totals_corners","Team Corners"],
-  cards:["alternate_totals_cards","Cards O/U","alternate_spreads_cards","Card Handicap"],
-  shots:["player_shots","Player Shots"],
-  sot:["player_shots_on_target","Player Shots on Target"],
-  player_cards:["player_to_receive_card","Player to Receive Card"]
-};
-const marketKeys=Object.values(MARKETS).filter((_,i)=>i%2===0).map(x=>x[0]);
-const wantedAll=["h2h","totals","btts","alternate_totals_corners","alternate_spreads_corners","alternate_team_totals_corners","alternate_totals_cards","alternate_spreads_cards","player_shots","player_shots_on_target","player_to_receive_card"];
+const API = "https://api.the-odds-api.com/v4";
 
-async function get(url,key){
-  const r=await fetch(url); const t=await r.text(); let data; try{data=JSON.parse(t)}catch{data={error:t}};
-  if(!r.ok) throw new Error(data?.message||data?.error||`API ${r.status}`);
-  return {data,headers:r.headers};
+const MARKET_OPTIONS = [
+  ["h2h", "Match Result"],
+  ["totals", "Goals O/U"],
+  ["btts", "BTTS"],
+  ["alternate_totals_corners", "Corners O/U"],
+  ["alternate_spreads_corners", "Corner Handicap"],
+  ["alternate_team_totals_corners", "Team Corners"],
+  ["alternate_totals_cards", "Cards O/U"],
+  ["alternate_spreads_cards", "Card Handicap"],
+  ["player_shots", "Player Shots"],
+  ["player_shots_on_target", "Shots on Target"],
+  ["player_to_receive_card", "Player Cards"]
+];
+
+// Used only for the convenient "Major + Cups" filter. The actual competition list
+// is loaded from /sports so newly available competitions can still be selected.
+const MAJOR_KEYS = new Set([
+  "soccer_epl", "soccer_spain_la_liga", "soccer_germany_bundesliga", "soccer_italy_serie_a",
+  "soccer_france_ligue_one", "soccer_uefa_champs_league", "soccer_uefa_europa_league",
+  "soccer_uefa_europa_conference_league", "soccer_netherlands_eredivisie", "soccer_portugal_primeira_liga",
+  "soccer_spl", "soccer_efl_champ", "soccer_usa_mls", "soccer_brazil_campeonato",
+  "soccer_argentina_primera_division", "soccer_belgium_first_div", "soccer_turkey_super_league",
+  "soccer_saudi_arabia_pro_league", "soccer_england_efl_cup", "soccer_fa_cup",
+  "soccer_spain_copa_del_rey", "soccer_germany_dfb_pokal", "soccer_italy_coppa_italia",
+  "soccer_france_coupe_de_france", "soccer_portugal_taca_de_portugal", "soccer_netherlands_knvb_beker",
+  "soccer_uefa_champs_league_qualification", "soccer_uefa_europa_league_qualification",
+  "soccer_uefa_europa_conference_league_qualification", "soccer_fifa_world_cup",
+  "soccer_fifa_world_cup_qualifiers_europe", "soccer_fifa_world_cup_qualifiers_south_america",
+  "soccer_club_world_cup"
+]);
+
+async function api(url) {
+  const res = await fetch(url);
+  const text = await res.text();
+  let data;
+  try { data = JSON.parse(text); } catch { data = { error: text }; }
+  if (!res.ok) throw new Error(data?.message || data?.error || `API ${res.status}`);
+  return { data, headers: res.headers };
 }
-function isoStart(d){return new Date(d+"T00:00:00").toISOString()}
-function isoEnd(d){return new Date(d+"T23:59:59").toISOString()}
-function noVig(quotes){
-  const nums=quotes.map(q=>1/Number(q.price)).filter(Number.isFinite);
-  const sum=nums.reduce((a,b)=>a+b,0); return nums.map(x=>x/sum);
+
+function startISO(date) { return `${date}T00:00:00Z`; }
+function endISO(date) { return `${date}T23:59:59Z`; }
+
+function decimal(p) { return Number(p); }
+function probabilityForBook(outcomes) {
+  const inv = outcomes.map(o => 1 / decimal(o.price)).filter(Number.isFinite);
+  const sum = inv.reduce((a, b) => a + b, 0);
+  if (!sum) return [];
+  return inv.map(x => x / sum);
 }
-function marketRows(event){
-  const rows=[];
-  const groups={};
-  for(const b of event.bookmakers||[]) for(const m of b.markets||[]){
-    for(const o of m.outcomes||[]){
-      const point=o.point ?? "";
-      const desc=o.description || "";
-      const id=`${m.key}|${desc}|${point}|${o.name}`;
-      (groups[id] ||= []).push({book:b.title,bookKey:b.key,price:Number(o.price),point,description:desc,market:m.key});
+
+// Build a fair probability from complete outcome sets at each bookmaker.
+// This is materially better than treating several quotes for the same outcome
+// as if they were one market.
+function buildRows(event) {
+  const groups = new Map();
+  for (const bookmaker of event.bookmakers || []) {
+    for (const market of bookmaker.markets || []) {
+      const outcomes = (market.outcomes || []).filter(o => Number.isFinite(Number(o.price)));
+      if (!outcomes.length) continue;
+      const point = outcomes[0]?.point ?? "";
+      const desc = outcomes[0]?.description || "";
+      const groupKey = `${market.key}|${desc}|${point}`;
+      if (!groups.has(groupKey)) groups.set(groupKey, []);
+      groups.get(groupKey).push({ bookmaker, market, outcomes });
     }
   }
-  for(const [id,quotes] of Object.entries(groups)){
-    if(quotes.length<2) continue;
-    const best=quotes.reduce((a,b)=>b.price>a.price?b:a);
-    const probs=noVig(quotes);
-    const p=probs[quotes.indexOf(best)];
-    if(!p||!best.price) continue;
-    const fair=1/p, value=best.price/fair-1;
-    rows.push({id,eventId:event.id,league:event.sport_title,home:event.home_team,away:event.away_team,
-      commence_time:event.commence_time,market:best.market,description:best.description,point:best.point,
-      selection:id.split("|").pop(),bookmaker:best.book,odds:best.price,fairOdds:fair,probability:p,value,
-      books:quotes.length});
+
+  const rows = [];
+  for (const [groupKey, books] of groups.entries()) {
+    if (books.length < 2) continue;
+
+    const fairBySelection = new Map();
+    for (const entry of books) {
+      const probs = probabilityForBook(entry.outcomes);
+      entry.outcomes.forEach((outcome, i) => {
+        const key = `${outcome.name}|${outcome.description || ""}|${outcome.point ?? ""}`;
+        if (!fairBySelection.has(key)) fairBySelection.set(key, []);
+        if (probs[i] > 0) fairBySelection.get(key).push(probs[i]);
+      });
+    }
+
+    for (const entry of books) {
+      for (const outcome of entry.outcomes) {
+        const key = `${outcome.name}|${outcome.description || ""}|${outcome.point ?? ""}`;
+        const fairSamples = fairBySelection.get(key) || [];
+        if (fairSamples.length < 2) continue;
+        const fairProbability = fairSamples.reduce((a, b) => a + b, 0) / fairSamples.length;
+        const bestPrice = Number(outcome.price);
+        if (!(fairProbability > 0) || !(bestPrice > 1)) continue;
+        const fairOdds = 1 / fairProbability;
+        const value = bestPrice / fairOdds - 1;
+        rows.push({
+          id: `${event.id}-${groupKey}-${entry.bookmaker.key}-${outcome.name}-${outcome.point ?? ""}`,
+          eventId: event.id,
+          sportKey: event.sport_key,
+          league: event.sport_title,
+          home: event.home_team,
+          away: event.away_team,
+          commence_time: event.commence_time,
+          market: entry.market.key,
+          selection: outcome.description ? `${outcome.description} — ${outcome.name}` : outcome.name,
+          outcome: outcome.name,
+          description: outcome.description || "",
+          point: outcome.point ?? null,
+          bookmaker: entry.bookmaker.title,
+          bookmakerKey: entry.bookmaker.key,
+          odds: bestPrice,
+          fairOdds,
+          probability: fairProbability,
+          value,
+          books: fairSamples.length
+        });
+      }
+    }
   }
   return rows;
 }
-function labelMarket(k){return MARKETS[k]?.[1]||k}
-function confidence(r){
-  const v=r.value*100,p=r.probability*100,b=r.books;
-  if(v>=15&&p>=60&&b>=4)return "VERY HIGH";
-  if(v>=10&&p>=55&&b>=3)return "HIGH";
-  if(v>=6&&p>=45&&b>=2)return "MEDIUM";
+
+function confidence(row) {
+  const value = row.value * 100;
+  const probability = row.probability * 100;
+  const books = row.books;
+  if (value >= 15 && probability >= 60 && books >= 4) return "VERY HIGH";
+  if (value >= 10 && probability >= 55 && books >= 3) return "HIGH";
+  if (value >= 6 && probability >= 45 && books >= 2) return "MEDIUM";
   return "LOW";
 }
-exports.handler=async(event)=>{
-  const key=process.env.ODDS_API_KEY;
-  if(!key)return {statusCode:500,headers:{"content-type":"application/json"},body:JSON.stringify({error:"Missing ODDS_API_KEY"})};
-  const q=event.queryStringParameters||{};
-  const from=q.from||new Date().toISOString().slice(0,10), to=q.to||from;
-  const league=q.league||"major", region=q.region||process.env.ODDS_API_REGION||"uk";
-  const selected=(q.markets||"result,goals,btts,corners,cards,shots,sot,player_cards").split(",").filter(Boolean);
-  const wanted=selected.flatMap(k=>MARKETS[k]? [MARKETS[k][0]]:[]).filter((v,i,a)=>a.indexOf(v)===i);
-  const maxGames=Math.min(Math.max(Number(q.maxGames||8),1),30);
-  try{
-    const sportsR=await get(`${API}/sports/?apiKey=${key}`,key);
-    const sports=(sportsR.data||[]).filter(s=>s.group==="Soccer"&&s.active);
+
+function marketLabel(key) {
+  return MARKET_OPTIONS.find(x => x[0] === key)?.[1] || key;
+}
+
+function requestedMarkets(value) {
+  if (!value || value === "all") return MARKET_OPTIONS.map(x => x[0]);
+  const wanted = value.split(",").filter(Boolean);
+  return wanted.filter(k => MARKET_OPTIONS.some(x => x[0] === k));
+}
+
+exports.handler = async (event) => {
+  const key = process.env.ODDS_API_KEY;
+  if (!key) return json(500, { error: "Missing ODDS_API_KEY in Netlify environment variables." });
+
+  const q = event.queryStringParameters || {};
+  const from = q.from || new Date().toISOString().slice(0, 10);
+  const to = q.to || from;
+  const competition = q.league || "all";
+  const region = q.region || process.env.ODDS_API_REGION || "uk";
+  const maxGames = Math.min(Math.max(parseInt(q.maxGames || "8", 10), 1), 25);
+  const minValue = Number(q.minValue || 3) / 100;
+  const markets = requestedMarkets(q.markets);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    return json(400, { error: "Dates must be YYYY-MM-DD." });
+  }
+  if (from > to) return json(400, { error: "FROM date cannot be after TO date." });
+  if (!markets.length) return json(400, { error: "Choose at least one market." });
+
+  try {
+    // Free endpoint: load currently available competitions dynamically.
+    const sportsResponse = await api(`${API}/sports/?apiKey=${encodeURIComponent(key)}`);
+    const allSoccer = (sportsResponse.data || []).filter(s => s.group === "Soccer" && s.active);
+
     let chosen;
-    if(league==="major") {
-      const set=new Set(MAJOR_PATTERNS.map(x=>x[1]));
-      chosen=sports.filter(s=>set.has(s.key));
-    } else if(league==="all") chosen=sports;
-    else chosen=sports.filter(s=>s.key===league);
-    const events=[];
-    for(const s of chosen){
-      const u=new URL(`${API}/sports/${s.key}/events`);
-      u.searchParams.set("apiKey",key); u.searchParams.set("dateFormat","iso");
-      if(league!=="major"&&league!=="all"){u.searchParams.set("commenceTimeFrom",isoStart(from));u.searchParams.set("commenceTimeTo",isoEnd(to))}
-      else {u.searchParams.set("commenceTimeFrom",isoStart(from));u.searchParams.set("commenceTimeTo",isoEnd(to))}
-      const er=await get(u.toString(),key);
-      for(const e of (er.data||[])) events.push({...e,sport_title:s.title});
+    if (competition === "major") {
+      chosen = allSoccer.filter(s => MAJOR_KEYS.has(s.key));
+    } else if (competition === "all") {
+      chosen = allSoccer;
+    } else {
+      chosen = allSoccer.filter(s => s.key === competition);
     }
-    events.sort((a,b)=>new Date(a.commence_time)-new Date(b.commence_time));
-    const limited=events.slice(0,maxGames);
-    const allRows=[];
-    for(const e of limited){
-      const u=new URL(`${API}/sports/${e.sport_key}/events/${e.id}/odds`);
-      u.searchParams.set("apiKey",key);u.searchParams.set("regions",region);u.searchParams.set("markets",wanted.join(","));u.searchParams.set("oddsFormat","decimal");u.searchParams.set("dateFormat","iso");
-      try{
-        const or=await get(u.toString(),key);
-        const ev=or.data;
-        for(const r of marketRows(ev)) {
-          r.marketLabel=labelMarket(Object.keys(MARKETS).find(k=>MARKETS[k][0]===r.market)||r.market);
-          r.confidence=confidence(r);
-          allRows.push(r);
+
+    const events = [];
+    // Events endpoint is quota-free and supports date filtering.
+    for (const sport of chosen) {
+      const u = new URL(`${API}/sports/${sport.key}/events`);
+      u.searchParams.set("apiKey", key);
+      u.searchParams.set("dateFormat", "iso");
+      u.searchParams.set("commenceTimeFrom", startISO(from));
+      u.searchParams.set("commenceTimeTo", endISO(to));
+      const response = await api(u.toString());
+      for (const e of response.data || []) events.push({ ...e, sport_title: sport.title });
+    }
+
+    events.sort((a, b) => new Date(a.commence_time) - new Date(b.commence_time));
+    const limited = events.slice(0, maxGames);
+    const rows = [];
+    let creditsRemaining = null;
+    let creditsUsed = null;
+
+    for (const e of limited) {
+      const u = new URL(`${API}/sports/${e.sport_key}/events/${e.id}/odds`);
+      u.searchParams.set("apiKey", key);
+      u.searchParams.set("regions", region);
+      u.searchParams.set("markets", markets.join(","));
+      u.searchParams.set("oddsFormat", "decimal");
+      u.searchParams.set("dateFormat", "iso");
+      try {
+        const response = await api(u.toString());
+        creditsRemaining = response.headers.get("x-requests-remaining") || creditsRemaining;
+        creditsUsed = response.headers.get("x-requests-used") || creditsUsed;
+        const eventRows = buildRows(response.data);
+        for (const row of eventRows) {
+          row.marketLabel = marketLabel(row.market);
+          row.confidence = confidence(row);
+          rows.push(row);
         }
-      }catch(err){ /* specialist market may be unavailable for this event/bookmaker */ }
+      } catch (err) {
+        // A specialist market can be unavailable for an event/bookmaker. Keep scanning.
+      }
     }
-    const min=Number(q.minValue||3)/100, filtered=allRows.filter(r=>r.value>=min).sort((a,b)=>b.value-a.value);
-    const h=limited.length?{}:{};
-    return {statusCode:200,headers:{"content-type":"application/json","cache-control":"no-store","x-scanner-events":String(limited.length)},body:JSON.stringify({
-      generatedAt:new Date().toISOString(),from,to,leagues:chosen.map(s=>({key:s.key,title:s.title})),eventsScanned:limited.length,
-      gamesFound:events.length,rows:filtered,availableMarkets:selected,warning:"Additional soccer markets such as player shots/SOT/cards are not guaranteed for every league, bookmaker or event. The API documents specialist coverage as limited and expanding.",
-      usage:{remaining:orRemainingPlaceholder(),note:"Credits are returned in API response headers; this serverless aggregation reports them only when available from the last successful event request."}
-    })};
-  }catch(err){return {statusCode:400,headers:{"content-type":"application/json"},body:JSON.stringify({error:err.message})}}
+
+    const filtered = rows
+      .filter(r => r.value >= minValue)
+      .sort((a, b) => b.value - a.value || b.probability - a.probability);
+
+    return json(200, {
+      generatedAt: new Date().toISOString(),
+      from, to, competition, region,
+      eventsScanned: limited.length,
+      gamesFound: events.length,
+      competitions: allSoccer.map(s => ({ key: s.key, title: s.title, description: s.description })),
+      selectedCompetitions: chosen.map(s => ({ key: s.key, title: s.title })),
+      rows: filtered,
+      requestedMarkets: markets.map(marketLabel),
+      usage: { remaining: creditsRemaining, used: creditsUsed },
+      warning: "Fair odds are market-consensus estimates after removing bookmaker margin. Specialist markets are only shown when the API returns them for the selected event/region."
+    });
+  } catch (err) {
+    return json(400, { error: err.message });
+  }
 };
-function orRemainingPlaceholder(){return null}
+
+function json(statusCode, body) {
+  return { statusCode, headers: { "content-type": "application/json", "cache-control": "no-store" }, body: JSON.stringify(body) };
+}
