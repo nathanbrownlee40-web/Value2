@@ -1,7 +1,1 @@
-{
-  "name":"value-bet-scanner-v2",
-  "version":"2.0.0",
-  "private":true,
-  "scripts":{"dev":"vite","build":"vite build","preview":"vite preview"},
-  "dependencies":{"@vitejs/plugin-react":"^4.3.1","vite":"^5.4.10","react":"^18.3.1","react-dom":"^18.3.1"}
-}
+{"name":"bet-scanner-v3","version":"3.0.0","private":true,"scripts":{"build":"vite build","dev":"vite"},"dependencies":{"@vitejs/plugin-react":"^4.3.1","vite":"^5.4.10","react":"^18.3.1","react-dom":"^18.3.1"},"devDependencies":{}}

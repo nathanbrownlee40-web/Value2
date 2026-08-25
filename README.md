@@ -1,32 +1,21 @@
-# Value Bet Scanner 2.0
+# Bet Scanner 3.0 — Netlify
 
-Netlify-ready football value scanner using The Odds API v4.
+## Fixes in this version
+- Real date FROM/TO filters using The Odds API event endpoint.
+- Major-league selector plus individual leagues.
+- Match date and kickoff time on every result.
+- Best bookmaker shown on every result.
+- Proper market selector: Match Result, Goals O/U, BTTS, Corners, Cards, Player Shots, Shots on Target, Player Cards.
+- Event-specific odds requests for specialist soccer markets.
+- Value, fair odds, probability and confidence.
+- Max-games control to protect the 500-credit free quota.
 
-## Netlify environment variables
-- `ODDS_API_KEY` — your secret API key
-- `ODDS_API_REGION` — default `uk`
-- `SCAN_MAX_EVENTS` — default `12`, maximum `40`
+## Netlify environment
+`ODDS_API_KEY` = your key
+`ODDS_API_REGION` = `uk` by default.
 
-Do not put the API key in frontend code or commit it to GitHub.
+## Important API limitation
+The Odds API documentation says additional soccer markets have limited coverage and are available only from selected bookmakers/sports; soccer player props are currently listed as limited to US bookmakers. Therefore, UK region may return goals/BTTS/corners/cards but may not return player shots/SOT for every event. The app will not invent missing markets.
 
-## What it scans
-- Match result
-- BTTS / BTTS first half
-- Goals totals / team goals
-- Corners / team corners / corner handicap
-- Cards / card handicap
-- Player shots
-- Player shots on target
-- Player to receive a card
-
-Coverage depends on bookmaker/sport/market availability. Some soccer player props are limited to selected bookmakers and regions.
-
-## How the value calculation works
-For each market line, the scanner removes the bookmaker margin from the available two-way/three-way quotes to estimate a fair probability. It then compares the best bookmaker price against the estimated fair odds.
-
-`value = best_bookmaker_odds / fair_odds - 1`
-
-Confidence is deliberately labelled as a heuristic ranking, not a predictive model.
-
-## Free-plan protection
-The API's event-odds endpoint charges by returned markets × regions. The scanner defaults to 12 events to avoid burning the 500-credit free allowance too quickly. You can lower `SCAN_MAX_EVENTS` to 5–10 for testing.
+## Quota
+The events endpoint is quota-free. Event-odds requests cost according to markets x regions. With 1 region, requesting 11 specialist markets for 8 games can consume up to 88 credits, so use the market filter and max-games setting carefully on a 500-credit plan.

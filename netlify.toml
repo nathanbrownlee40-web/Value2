@@ -4,6 +4,6 @@ publish="dist"
 [functions]
 directory="netlify/functions"
 [[redirects]]
-from="/api/scanner"
-to="/.netlify/functions/scanner"
+from="/api/*"
+to="/.netlify/functions/:splat"
 status=200
