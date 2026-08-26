@@ -9,8 +9,8 @@ const marketOptions=[
   ["player_shots_on_target","Shots on Target"],["player_to_receive_card","Player Cards"]
 ];
 const today=()=>new Date().toISOString().slice(0,10);
-const fmtDate=d=>new Date(d).toLocaleDateString([], {weekday:"short",day:"2-digit",month:"short",year:"numeric"});
-const fmtTime=d=>new Date(d).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});
+const fmtDate=d=>new Date(d).toLocaleDateString("en-GB", {weekday:"short",day:"2-digit",month:"short",year:"numeric",timeZone:"Europe/London"});
+const fmtTime=d=>new Date(d).toLocaleTimeString("en-GB", {hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Europe/London"});
 
 function App(){
  const [from,setFrom]=useState(today()),[to,setTo]=useState(today()),[competition,setCompetition]=useState("all"),[market,setMarket]=useState("all"),[region,setRegion]=useState("uk"),[minValue,setMinValue]=useState(3),[maxGames,setMaxGames]=useState(8),[confidence,setConfidence]=useState("ALL");
@@ -32,7 +32,7 @@ function App(){
  },[meta]);
  const shown=useMemo(()=>rows.filter(r=>confidence==="ALL"||r.confidence===confidence),[rows,confidence]);
  return <div className="app">
-  <header><div><div className="eyebrow">LIVE FOOTBALL VALUE ENGINE</div><h1>Bet Scanner <b>3.2</b></h1><p>Leagues + cup games • Goals • Corners • Shots • SOT • Cards • BTTS</p></div><button onClick={scan} disabled={loading}>{loading?"SCANNING…":"SCAN NOW"}</button></header>
+  <header><div><div className="eyebrow">LIVE FOOTBALL VALUE ENGINE</div><h1>Bet Scanner <b>3.4</b></h1><p>Leagues + cup games • Goals • Corners • Shots • SOT • Cards • BTTS • Value</p></div><button onClick={scan} disabled={loading}>{loading?"SCANNING…":"SCAN NOW"}</button></header>
   <section className="filters">
    <div><label>FROM</label><input type="date" value={from} onChange={e=>setFrom(e.target.value)}/></div>
    <div><label>TO</label><input type="date" value={to} onChange={e=>setTo(e.target.value)}/></div>
@@ -52,7 +52,7 @@ function App(){
    <div className="grid"><div><small>BEST ODDS</small><strong>{Number(r.odds).toFixed(2)}</strong><em>{r.bookmaker}</em></div><div><small>FAIR ODDS</small><strong>{Number(r.fairOdds).toFixed(2)}</strong></div><div><small>PROBABILITY</small><strong>{(r.probability*100).toFixed(1)}%</strong></div><div><small>VALUE</small><strong className="green">+{(r.value*100).toFixed(1)}%</strong></div></div>
    <div className="meta">{r.point!==null&&r.point!==undefined?`Line: ${r.point} • `:""}Books compared: {r.books}</div>
   </article>)}</main>
-  <footer>Bet Scanner 3.2 • The Odds API • Always verify the market and price at the bookmaker before betting.</footer>
+  <footer>Bet Scanner 3.4 • The Odds API • Always verify the market and price at the bookmaker before betting.</footer>
  </div>
 }
 createRoot(document.getElementById("root")).render(<App/>);
