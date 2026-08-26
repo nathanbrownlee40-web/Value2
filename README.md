@@ -1,21 +1,13 @@
-# Bet Scanner 3.2 — leagues AND cup games
+# Bet Scanner 3.3 — Rate-limit safe
 
-Deploy to Netlify. Keep `ODDS_API_KEY` in Netlify environment variables.
+This version keeps the v3.2 functionality but fixes the `Requests are too frequent` problem.
 
-## What changed
-- Competition list is loaded dynamically from The Odds API `/sports` endpoint.
-- Default is **All competitions**, so cup competitions are not excluded.
-- **Major leagues + cups** is a shortcut that includes major domestic and European cups.
-- Date range uses proper ISO timestamps server-side.
-- Displays kickoff date/time and the bookmaker with the best price.
-- Market selector covers match result, goals, BTTS, corners, cards, player shots, shots on target and player cards.
-- Fair probability is calculated from complete outcome sets at each bookmaker, then averaged across books.
-- Specialist markets are only shown when the API actually returns them.
-- API credit headers are surfaced when available.
+Changes:
+- Caches `/sports` for 1 hour.
+- Caches quota-free `/events` results for 10 minutes.
+- Spaces requests instead of firing them in a burst.
+- Retries HTTP 429 rate-limit responses with backoff.
+- Surfaces rate-limit errors instead of silently returning zero games.
+- Keeps all leagues/cups, date filters, bookmaker region, market filters and value/confidence calculations.
 
-## Environment
-- `ODDS_API_KEY` required.
-- `ODDS_API_REGION=uk` optional.
-
-## Free-plan caution
-The `/sports` and `/events` endpoints do not consume odds quota. Event odds calls do. Requesting many markets at once costs more credits, so use a sensible Max Games value.
+The Odds API recommends caching sports/events responses and spacing requests when 429s occur.
