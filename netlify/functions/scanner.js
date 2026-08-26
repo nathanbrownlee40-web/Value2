@@ -31,13 +31,39 @@ const MAJOR_KEYS = new Set([
   "soccer_club_world_cup"
 ]);
 
-async function api(url) {
-  const res = await fetch(url);
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = { error: text }; }
-  if (!res.ok) throw new Error(data?.message || data?.error || `API ${res.status}`);
-  return { data, headers: res.headers };
+const CACHE = globalThis.__BET_SCANNER_CACHE || (globalThis.__BET_SCANNER_CACHE = new Map());
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function api(url, options = {}) {
+  const { retries = 2, delayMs = 450, cacheKey = null, cacheTtlMs = 0 } = options;
+  if (cacheKey && cacheTtlMs > 0) {
+    const hit = CACHE.get(cacheKey);
+    if (hit && Date.now() - hit.at < cacheTtlMs) return hit.value;
+  }
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url);
+      const text = await res.text();
+      let data;
+      try { data = JSON.parse(text); } catch { data = { error: text }; }
+      if (res.status === 429) {
+        const retryAfter = Number(res.headers.get('retry-after'));
+        const wait = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : delayMs * (attempt + 1);
+        if (attempt < retries) { await sleep(wait); continue; }
+        throw new Error('The Odds API is rate-limiting requests (429). Wait a few seconds and scan again. The scanner now spaces and retries requests automatically.');
+      }
+      if (!res.ok) throw new Error(data?.message || data?.error || `API ${res.status}`);
+      const value = { data, headers: res.headers };
+      if (cacheKey && cacheTtlMs > 0) CACHE.set(cacheKey, { at: Date.now(), value });
+      return value;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries && /429|rate.?limit/i.test(String(err.message))) { await sleep(delayMs * (attempt + 1)); continue; }
+      throw err;
+    }
+  }
+  throw lastErr || new Error('API request failed');
 }
 
 function startISO(date) { return `${date}T00:00:00Z`; }
@@ -160,7 +186,7 @@ exports.handler = async (event) => {
 
   try {
     // Free endpoint: load currently available competitions dynamically.
-    const sportsResponse = await api(`${API}/sports/?apiKey=${encodeURIComponent(key)}`);
+    const sportsResponse = await api(`${API}/sports/?apiKey=${encodeURIComponent(key)}`, { cacheKey: `sports:${key}`, cacheTtlMs: 60 * 60 * 1000, retries: 2, delayMs: 800 });
     const allSoccer = (sportsResponse.data || []).filter(s => s.group === "Soccer" && s.active);
 
     let chosen;
@@ -180,7 +206,9 @@ exports.handler = async (event) => {
       u.searchParams.set("dateFormat", "iso");
       u.searchParams.set("commenceTimeFrom", startISO(from));
       u.searchParams.set("commenceTimeTo", endISO(to));
-      const response = await api(u.toString());
+      const response = await api(u.toString(), { cacheKey: `events:${key}:${sport.key}:${from}:${to}`, cacheTtlMs: 10 * 60 * 1000, retries: 3, delayMs: 800 });
+      // The events endpoint is quota-free, but it is still rate-limited. Keep requests spaced out.
+      await sleep(250);
       for (const e of response.data || []) events.push({ ...e, sport_title: sport.title });
     }
 
@@ -198,7 +226,9 @@ exports.handler = async (event) => {
       u.searchParams.set("oddsFormat", "decimal");
       u.searchParams.set("dateFormat", "iso");
       try {
-        const response = await api(u.toString());
+        const response = await api(u.toString(), { cacheKey: `events:${key}:${sport.key}:${from}:${to}`, cacheTtlMs: 10 * 60 * 1000, retries: 3, delayMs: 800 });
+      // The events endpoint is quota-free, but it is still rate-limited. Keep requests spaced out.
+      await sleep(250);
         creditsRemaining = response.headers.get("x-requests-remaining") || creditsRemaining;
         creditsUsed = response.headers.get("x-requests-used") || creditsUsed;
         const eventRows = buildRows(response.data);
@@ -208,7 +238,8 @@ exports.handler = async (event) => {
           rows.push(row);
         }
       } catch (err) {
-        // A specialist market can be unavailable for an event/bookmaker. Keep scanning.
+        // Missing specialist markets are normal. Rate limits are not: surface them so the user knows what happened.
+        if (/rate.?limit|429/i.test(String(err.message))) throw err;
       }
     }
 
@@ -226,7 +257,7 @@ exports.handler = async (event) => {
       rows: filtered,
       requestedMarkets: markets.map(marketLabel),
       usage: { remaining: creditsRemaining, used: creditsUsed },
-      warning: "Fair odds are market-consensus estimates after removing bookmaker margin. Specialist markets are only shown when the API returns them for the selected event/region."
+      warning: "Fair odds are market-consensus estimates after removing bookmaker margin. Specialist markets are only shown when the API returns them for the selected event/region. Sports/events responses are cached and requests are deliberately spaced to avoid API rate limits."
     });
   } catch (err) {
     return json(400, { error: err.message });
